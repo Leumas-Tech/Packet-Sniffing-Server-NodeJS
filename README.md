@@ -6,7 +6,7 @@ This project is a network packet sniffing server implemented in NodeJS. It allow
 
 1. **Clone the repository**:
     ```sh
-    git clone https://github.com/your-username/Packet-Sniffing-Server-NodeJS.git
+    git clone https://github.com/Leumas-Tech/Packet-Sniffing-Server-NodeJS.git
     ```
 
 2. **Navigate into the project directory**:
