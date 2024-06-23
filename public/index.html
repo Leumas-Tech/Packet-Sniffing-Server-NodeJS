@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Scanner</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .loader {
+            border-top-color: #3498db;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .sniffer-session {
+            display: none;
+        }
+        .sniffer-session.active {
+            display: block;
+        }
+        .packet-list {
+            max-height: 400px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            padding: 0.5rem;
+        }
+        .packet-list li {
+            font-family: monospace;
+            white-space: pre;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .highlight-row {
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <div class="container mx-auto py-8">
+        <h1 class="text-3xl font-bold text-center mb-8">Network Scanner</h1>
+        <div class="flex justify-center mb-4">
+            <button id="scanBtn" class="bg-blue-500 text-white px-4 py-2 rounded mr-2">Scan</button>
+            <button id="detailedScanBtn" class="bg-green-500 text-white px-4 py-2 rounded">Detailed Scan</button>
+        </div>
+        <div id="loading" class="flex justify-center mb-4 hidden">
+            <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-32 w-32"></div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white shadow-md rounded">
+                <thead>
+                    <tr>
+                        <th class="py-2 px-4 bg-gray-200">IP Address</th>
+                        <th class="py-2 px-4 bg-gray-200">MAC Address</th>
+                        <th class="py-2 px-4 bg-gray-200">Ports</th>
+                        <th class="py-2 px-4 bg-gray-200">OS</th>
+                        <th class="py-2 px-4 bg-gray-200">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="resultsTable">
+                    <!-- Results will be appended here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="container mx-auto py-8">
+        <h1 class="text-3xl font-bold text-center mb-8">Packet Sniffer</h1>
+        <div class="flex justify-center mb-4">
+            <label for="ip" class="mr-2">IP Address:</label>
+            <input type="text" id="ip" name="ip" class="border rounded px-4 py-2">
+            <button onclick="startPacketSniffing()" class="bg-blue-500 text-white px-4 py-2 rounded ml-2">Start Sniffing</button>
+            <button onclick="stopPacketSniffing()" class="bg-red-500 text-white px-4 py-2 rounded ml-2">Stop Sniffing</button>
+            <button onclick="clearPacketList()" class="bg-gray-500 text-white px-4 py-2 rounded ml-2">Clear</button>
+        </div>
+        <div id="packetSessions" class="overflow-x-auto"></div>
+        <div class="flex justify-center mt-4">
+            <button onclick="prevSession()" class="bg-gray-500 text-white px-4 py-2 rounded mr-2">Previous</button>
+            <button onclick="nextSession()" class="bg-gray-500 text-white px-4 py-2 rounded">Next</button>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let sniffingSessions = [];
+        let currentSessionIndex = 0;
+
+        function startPacketSniffing() {
+            const ip = document.getElementById('ip').value;
+            if (!ip) {
+                alert('Please enter an IP address');
+                return;
+            }
+
+            fetch('/start-sniffing', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filter: `ip host ${ip}` })
+            }).then(response => response.json())
+              .then(data => {
+                  console.log(data.message);
+                  sniffingSessions.push({ id: Date.now(), ip });
+                  updateSessionDisplay();
+                  ws = new WebSocket('ws://localhost:3000');
+                  ws.onmessage = (event) => {
+                      const packet = JSON.parse(event.data);
+                      const timestamp = new Date().toLocaleTimeString();
+                      const packetInfo = `[${timestamp}] From: ${packet.from}, To: ${packet.to}, Length: ${packet.length}, Truncated: ${packet.truncated}, Data: ${packet.payload || 'N/A'}`;
+                      const packetList = document.getElementById(`packet-list-${currentSessionIndex}`);
+                      const listItem = document.createElement('li');
+                      listItem.textContent = packetInfo;
+                      packetList.appendChild(listItem);
+                  };
+              }).catch(error => console.error('Error:', error));
+        }
+
+        function stopPacketSniffing() {
+            if (ws) {
+                ws.close();
+            }
+            fetch('/stop-sniffing', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId: sniffingSessions[currentSessionIndex].id })
+            }).then(response => response.json())
+              .then(data => {
+                  console.log(data.message);
+              }).catch(error => console.error('Error:', error));
+        }
+
+        function clearPacketList() {
+            const packetList = document.getElementById(`packet-list-${currentSessionIndex}`);
+            if (packetList) {
+                packetList.innerHTML = '';
+            }
+        }
+
+        function updateSessionDisplay() {
+            const packetSessions = document.getElementById('packetSessions');
+            packetSessions.innerHTML = '';
+            sniffingSessions.forEach((session, index) => {
+                const sessionDiv = document.createElement('div');
+                sessionDiv.id = `session-${index}`;
+                sessionDiv.className = `sniffer-session ${index === currentSessionIndex ? 'active' : ''}`;
+
+                const sessionTitle = document.createElement('h2');
+                sessionTitle.textContent = `Session for IP: ${session.ip}`;
+                sessionTitle.className = "text-xl font-bold mb-2";
+                sessionDiv.appendChild(sessionTitle);
+
+                const packetList = document.createElement('ul');
+                packetList.id = `packet-list-${index}`;
+                packetList.className = "packet-list";
+                sessionDiv.appendChild(packetList);
+
+                packetSessions.appendChild(sessionDiv);
+            });
+        }
+
+        function prevSession() {
+            if (currentSessionIndex > 0) {
+                currentSessionIndex--;
+                updateSessionDisplay();
+            }
+        }
+
+        function nextSession() {
+            if (currentSessionIndex < sniffingSessions.length - 1) {
+                currentSessionIndex++;
+                updateSessionDisplay();
+            }
+        }
+
+        document.getElementById('scanBtn').addEventListener('click', () => {
+            startScan(false);
+        });
+
+        document.getElementById('detailedScanBtn').addEventListener('click', () => {
+            startScan(true);
+        });
+
+        function startScan(detailed) {
+            document.getElementById('loading').classList.remove('hidden');
+            fetch('/network-devices', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ detailed }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('loading').classList.add('hidden');
+                populateTable(detailed ? data.detailedInfo : data.activeIPs);
+            })
+            .catch(error => {
+                document.getElementById('loading').classList.add('hidden');
+                console.error('Error:', error);
+            });
+        }
+
+        function populateTable(data) {
+            const tableBody = document.getElementById('resultsTable');
+            tableBody.innerHTML = '';
+
+            data.forEach((device, index) => {
+                const row = document.createElement('tr');
+                row.id = `device-row-${index}`;
+                row.innerHTML = `
+                    <td class="py-2 px-4 border">${device.ip || device}</td>
+                    <td class="py-2 px-4 border">${device.mac || 'N/A'}</td>
+                    <td class="py-2 px-4 border">${formatPorts(device.ports)}</td>
+                    <td class="py-2 px-4 border">${device.osNmap || 'N/A'}</td>
+                    <td class="py-2 px-4 border">
+                        <button class="bg-blue-500 text-white px-4 py-2 rounded" onclick="startPacketSniffingFromTable('${device.ip || device}')">Start Sniffing</button>
+                        <button id="detailedScanBtn-${index}" class="bg-green-500 text-white px-4 py-2 rounded ml-2" onclick="detailedScan('${device.ip || device}', ${index})">Detailed Scan</button>
+                        <button class="bg-yellow-500 text-white px-4 py-2 rounded ml-2" onclick="shutdownDevice('${device.ip || device}')">Shutdown</button>
+                        <button class="bg-red-500 text-white px-4 py-2 rounded ml-2" onclick="rebootDevice('${device.ip || device}')">Reboot</button>
+                        <span id="loading-${index}" class="loader hidden"></span>
+                        <span id="elapsed-${index}" class="ml-2 text-sm text-gray-600"></span>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+
+        function formatPorts(ports) {
+            if (!ports || ports.length === 0) return 'N/A';
+            return ports.map(port => `${port.port}/${port.protocol} (${port.service})`).join(', ');
+        }
+
+        function startPacketSniffingFromTable(ip) {
+            document.getElementById('ip').value = ip;
+            startPacketSniffing();
+        }
+
+        function detailedScan(ip, rowIndex) {
+            alert('This can take anywhere from 2 to 20 minutes depending on how much is on your network.');
+            const detailedScanBtn = document.getElementById(`detailedScanBtn-${rowIndex}`);
+            const loader = document.getElementById(`loading-${rowIndex}`);
+            const elapsedTime = document.getElementById(`elapsed-${rowIndex}`);
+            detailedScanBtn.textContent = 'Fetching...';
+            loader.classList.remove('hidden');
+            let startTime = Date.now();
+
+            const interval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                elapsedTime.textContent = `Elapsed time: ${elapsed}s`;
+            }, 1000);
+
+            fetch('/network-device-details', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ ip }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                clearInterval(interval);
+                detailedScanBtn.textContent = 'Detailed Scan';
+                loader.classList.add('hidden');
+                elapsedTime.textContent = '';
+                const row = document.getElementById(`device-row-${rowIndex}`);
+                row.innerHTML = `
+                    <td class="py-2 px-4 border">${data.ip}</td>
+                    <td class="py-2 px-4 border">${data.mac || 'N/A'}</td>
+                    <td class="py-2 px-4 border">${formatPorts(data.ports)}</td>
+                    <td class="py-2 px-4 border">${data.osNmap || 'N/A'}</td>
+                    <td class="py-2 px-4 border">
+                        <button class="bg-blue-500 text-white px-4 py-2 rounded" onclick="startPacketSniffingFromTable('${data.ip}')">Start Sniffing</button>
+                        <button id="detailedScanBtn-${rowIndex}" class="bg-green-500 text-white px-4 py-2 rounded ml-2" onclick="detailedScan('${data.ip}', ${rowIndex})">Detailed Scan</button>
+                        <button class="bg-yellow-500 text-white px-4 py-2 rounded ml-2" onclick="shutdownDevice('${data.ip}')">Shutdown</button>
+                        <button class="bg-red-500 text-white px-4 py-2 rounded ml-2" onclick="rebootDevice('${data.ip}')">Reboot</button>
+                        <span id="loading-${rowIndex}" class="loader hidden"></span>
+                        <span id="elapsed-${rowIndex}" class="ml-2 text-sm text-gray-600"></span>
+                    </td>
+                `;
+            })
+            .catch(error => {
+                clearInterval(interval);
+                detailedScanBtn.textContent = 'Detailed Scan';
+                loader.classList.add('hidden');
+                elapsedTime.textContent = '';
+                console.error('Error:', error);
+            });
+        }
+
+        function shutdownDevice(ip) {
+            fetch('/shutdown-device', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ ip }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        }
+
+        function rebootDevice(ip) {
+            fetch('/reboot-device', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ ip }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        }
+    </script>
+</body>
+</html>

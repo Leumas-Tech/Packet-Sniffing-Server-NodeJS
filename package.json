@@ -1,0 +1,26 @@
+{
+  "name": "rtp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cap": "^0.2.1",
+    "cors": "^2.8.5",
+    "dgram": "^1.0.1",
+    "express": "^4.19.2",
+    "fs": "^0.0.1-security",
+    "net-ping": "^1.2.4",
+    "node-arp": "^1.0.6",
+    "node-nmap": "^4.0.0",
+    "node-wmi": "^0.0.5",
+    "raw-socket": "^1.8.1",
+    "workerpool": "^9.1.2",
+    "ws": "^8.17.1"
+  }
+}
